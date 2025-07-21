@@ -1,41 +1,64 @@
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from config import API_ID, API_HASH, BOT_TOKEN, STRING_SESSION
+from helper import save_user_step, get_user_step, clear_user_step
+from shrinkme import create_shortlink
+from movie_fetcher import fetch_movies
 
-# Bot client
-bot = Client(
-    "RoziBot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+app = Client("RoziBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# User client (for forwarding messages from source bot)
-user = Client(
-    name="userbot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    session_string=STRING_SESSION
-)
+# Start command
+@app.on_message(filters.command("start") & filters.private)
+async def start(client, message: Message):
+    await message.reply_text(
+        f"Hi {message.from_user.first_name},\nI'm Rozi Movie Bot 🍿.\n\nSearch for a movie by name and I’ll help you get it!",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("Search Movie", switch_inline_query_current_chat="")]
+        ])
+    )
 
-@bot.on_message(filters.command("start") & filters.private)
-async def start_handler(bot_client, message: Message):
-    await message.reply_text("Rozi bot is alive and ready! 🔥")
+# Handle inline queries
+@app.on_inline_query()
+async def inline_query_handler(client, inline_query):
+    query = inline_query.query.strip()
+    if not query:
+        return
 
-@bot.on_message(filters.text & filters.private)
-async def forward_handler(bot_client, message: Message):
-    if len(message.text) < 3:
-        return await message.reply_text("Movie name too short.")
-    
-    # Search in @Premiummovies0_bot using user client
-    async with user:
-        sent = await user.send_message("Premiummovies0_bot", message.text)
-        await sent.delete()  # Optional: delete search message
+    results = await fetch_movies(query)
+    await inline_query.answer(results, cache_time=1)
 
-        @user.on_message(filters.chat("Premiummovies0_bot"))
-        async def handler(_, msg: Message):
-            await message.reply_text(msg.text, disable_web_page_preview=True)
+# Callback query for "Get Link"
+@app.on_callback_query(filters.regex("getlink_"))
+async def get_link(client, callback_query):
+    movie_info = callback_query.data.split("getlink_")[1]
+    user_id = callback_query.from_user.id
 
-# Start both clients
-user.start()
-bot.run()
+    # Save step to track which movie user selected
+    save_user_step(user_id, movie_info)
+
+    short_url = create_shortlink(f"https://t.me/{app.me.username}?start=verify")
+    await callback_query.message.reply_text(
+        f"🔗 Please verify by clicking the link below:\n{short_url}\n\nAfter that, come back here.",
+        disable_web_page_preview=True
+    )
+
+# After shortlink verification
+@app.on_message(filters.command("verify") & filters.private)
+async def verify(client, message: Message):
+    user_id = message.from_user.id
+    movie_info = get_user_step(user_id)
+
+    if not movie_info:
+        await message.reply_text("❌ No movie selected. Please search again.")
+        return
+
+    # Deliver the movie
+    try:
+        await message.reply_text(f"🎬 Here is your movie:\n\n{movie_info}")
+    except Exception as e:
+        await message.reply_text("⚠️ Error while sending the movie.")
+        print(e)
+
+    clear_user_step(user_id)
+
+app.run()
