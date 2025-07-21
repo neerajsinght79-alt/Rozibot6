@@ -1,25 +1,13 @@
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+# helper.py
 
-def start_keyboard():
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("Search Movie 🍿", switch_inline_query_current_chat="")],
-            [InlineKeyboardButton("Join Updates Channel 🔔", url="https://t.me/Bollyhollyhub")]
-        ]
-    )
+user_steps = {}
 
-def movie_result_keyboard(movie_list):
-    buttons = []
-    for index, movie in enumerate(movie_list, start=1):
-        buttons.append([
-            InlineKeyboardButton(f"{index}. {movie['title']} ({movie['size']}, {movie['quality']})", 
-                                 callback_data=f"getlink_{index}")
-        ])
-    return InlineKeyboardMarkup(buttons)
+def save_user_step(user_id, step):
+    user_steps[user_id] = step
 
-def verify_keyboard(shortlink):
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("🔗 Verify to Get Link", url=shortlink)]
-        ]
-    )
+def get_user_step(user_id):
+    return user_steps.get(user_id, None)
+
+def clear_user_step(user_id):
+    if user_id in user_steps:
+        del user_steps[user_id]
