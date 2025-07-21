@@ -1,38 +1,41 @@
-# main.py
-
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from config import API_ID, API_HASH, BOT_TOKEN, STRING_SESSION
-import logging
 
-# Logging setup
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Pyrogram Client
-client = Client(
-    name="rozibot",
+# Bot client
+bot = Client(
+    "RoziBot",
     api_id=API_ID,
     api_hash=API_HASH,
-    bot_token=BOT_TOKEN,
+    bot_token=BOT_TOKEN
+)
+
+# User client (for forwarding messages from source bot)
+user = Client(
+    name="userbot",
+    api_id=API_ID,
+    api_hash=API_HASH,
     session_string=STRING_SESSION
 )
 
-# /start command handler
-@client.on_message(filters.command("start") & filters.private)
-async def start_handler(client, message: Message):
-    await message.reply_text(
-        "👋 Hello! I am Rozi Movie Bot.\n\n"
-        "🎬 Send a movie name here or search in the group.\n"
-        "I'll help you get the download link after verification ✅"
-    )
+@bot.on_message(filters.command("start") & filters.private)
+async def start_handler(bot_client, message: Message):
+    await message.reply_text("Rozi bot is alive and ready! 🔥")
 
-# Text message handler (optional placeholder for now)
-@client.on_message(filters.text & filters.private)
-async def handle_text(client, message: Message):
-    await message.reply_text("🔍 Searching for your movie...\n(Feature under development)")
+@bot.on_message(filters.text & filters.private)
+async def forward_handler(bot_client, message: Message):
+    if len(message.text) < 3:
+        return await message.reply_text("Movie name too short.")
+    
+    # Search in @Premiummovies0_bot using user client
+    async with user:
+        sent = await user.send_message("Premiummovies0_bot", message.text)
+        await sent.delete()  # Optional: delete search message
 
-# Start the bot
-if __name__ == "__main__":
-    logger.info("🔥 Rozi Bot is starting...")
-    client.run()
+        @user.on_message(filters.chat("Premiummovies0_bot"))
+        async def handler(_, msg: Message):
+            await message.reply_text(msg.text, disable_web_page_preview=True)
+
+# Start both clients
+user.start()
+bot.run()
