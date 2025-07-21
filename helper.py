@@ -1,10 +1,16 @@
-user_steps = {}
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-def save_user_step(user_id, results):
-    user_steps[user_id] = results
+def build_movie_keyboard(movies):
+    keyboard = []
+    for idx, movie in enumerate(movies, start=1):
+        button = [InlineKeyboardButton(
+            text=f"{idx}. {movie['title']} ({movie['quality']})",
+            callback_data=f"getlink_{idx}"
+        )]
+        keyboard.append(button)
+    return InlineKeyboardMarkup(keyboard)
 
-def get_user_step(user_id):
-    return user_steps.get(user_id)
-
-def clear_user_step(user_id):
-    user_steps.pop(user_id, None)
+def build_verification_keyboard(link):
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Verify & Get Movie", url=link)
+    ]])
