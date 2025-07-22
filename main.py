@@ -1,64 +1,72 @@
+import asyncio
 from pyrogram import Client, filters
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
-from config import API_ID, API_HASH, BOT_TOKEN, STRING_SESSION
-from helper import save_user_step, get_user_step, clear_user_step
-from shrinkme import create_shortlink
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
+from config import *
 from movie_fetcher import fetch_movies
+from shrinkme import get_shortlink
+from helper import save_user_step, get_user_step, force_join_keyboard
 
-app = Client("RoziBot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
+app = Client("rozi", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
-# Start command
-@app.on_message(filters.command("start") & filters.private)
-async def start(client, message: Message):
-    await message.reply_text(
-        f"Hi {message.from_user.first_name},\nI'm Rozi Movie Bot 🍿.\n\nSearch for a movie by name and I’ll help you get it!",
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("Search Movie", switch_inline_query_current_chat="")]
-        ])
-    )
-
-# Handle inline queries
-@app.on_inline_query()
-async def inline_query_handler(client, inline_query):
-    query = inline_query.query.strip()
-    if not query:
-        return
-
-    results = await fetch_movies(query)
-    await inline_query.answer(results, cache_time=1)
-
-# Callback query for "Get Link"
-@app.on_callback_query(filters.regex("getlink_"))
-async def get_link(client, callback_query):
-    movie_info = callback_query.data.split("getlink_")[1]
-    user_id = callback_query.from_user.id
-
-    # Save step to track which movie user selected
-    save_user_step(user_id, movie_info)
-
-    short_url = create_shortlink(f"https://t.me/{app.me.username}?start=verify")
-    await callback_query.message.reply_text(
-        f"🔗 Please verify by clicking the link below:\n{short_url}\n\nAfter that, come back here.",
-        disable_web_page_preview=True
-    )
-
-# After shortlink verification
-@app.on_message(filters.command("verify") & filters.private)
-async def verify(client, message: Message):
-    user_id = message.from_user.id
-    movie_info = get_user_step(user_id)
-
-    if not movie_info:
-        await message.reply_text("❌ No movie selected. Please search again.")
-        return
-
-    # Deliver the movie
+async def is_joined(client, user_id):
     try:
-        await message.reply_text(f"🎬 Here is your movie:\n\n{movie_info}")
-    except Exception as e:
-        await message.reply_text("⚠️ Error while sending the movie.")
-        print(e)
+        member = await client.get_chat_member(UPDATES_CHANNEL, user_id)
+        return member.status in ("member", "administrator", "creator")
+    except:
+        return False
 
-    clear_user_step(user_id)
+@app.on_message(filters.command("start"))
+async def start(client, message: Message):
+    if not await is_joined(client, message.from_user.id):
+        await message.reply("🔐 Please join our updates channel to use this bot.", reply_markup=force_join_keyboard())
+        return
+    await message.reply("👋 Welcome to Rozi Movie Bot!\n\nSend me a movie name to search.")
+
+@app.on_message(filters.private & filters.text & ~filters.command("start"))
+async def search_movie(client, message: Message):
+    if not await is_joined(client, message.from_user.id):
+        await message.reply("🔐 Please join our updates channel to use this bot.", reply_markup=force_join_keyboard())
+        return
+
+    results = await fetch_movies(message.text)
+    if not results:
+        await message.reply("❌ No results found.")
+        return
+
+    buttons = []
+    for i, msg in enumerate(results, 1):
+        save_user_step(message.from_user.id, msg.id)
+        buttons.append([InlineKeyboardButton(f"{i}. {msg.text[:30]}", callback_data=f"getlink_{msg.id}")])
+
+    await message.reply("🎬 Select a movie to get the download link:", reply_markup=InlineKeyboardMarkup(buttons))
+
+@app.on_callback_query(filters.regex("getlink_"))
+async def generate_link(client, callback_query: CallbackQuery):
+    msg_id = int(callback_query.data.split("_")[1])
+    user_id = callback_query.from_user.id
+    short_url = await get_shortlink(f"https://t.me/{app.me.username}?start=verify_{msg_id}")
+    await callback_query.message.reply(
+        "🔗 Click below to verify and get your movie:",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("✅ Get Link", url=short_url)]])
+    )
+
+@app.on_message(filters.command("start") & filters.regex("start verify_"))
+async def deliver_movie(client, message: Message):
+    msg_id = int(message.text.split("_")[1])
+    if not await is_joined(client, message.from_user.id):
+        await message.reply("🔐 Please join our updates channel to use this bot.", reply_markup=force_join_keyboard())
+        return
+
+    try:
+        await client.copy_message(chat_id=message.chat.id, from_chat_id=MOVIE_SOURCE_BOT, message_id=msg_id)
+    except:
+        await message.reply("❌ Failed to deliver the movie. Try again later.")
+
+@app.on_callback_query(filters.regex("verify_join"))
+async def joined_check(client, callback_query: CallbackQuery):
+    if await is_joined(client, callback_query.from_user.id):
+        await callback_query.message.edit("✅ Verified! Now send me a movie name.")
+    else:
+        await callback_query.answer("❌ You must join the channel first!", show_alert=True)
 
 app.run()
